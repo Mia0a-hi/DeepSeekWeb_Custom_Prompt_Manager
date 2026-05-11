@@ -1,157 +1,155 @@
 // ==UserScript==
 // @name         DeepSeek Custom Prompt Manager
-// @version      1.0.0
-// @description  DeepSeek 提示词管理：彻底修复暗黑模式下下拉菜单背景发白刺眼的问题，全面适配深色主题。
-// @author       Mia0a
-// @license      GPL-3.0-or-later
+// @version      1.1.0
+// @description  DeepSeek 提示词管理：修复默认专家模式逻辑及深浅色切换问题。
+// @author       Mia0a (Optimized)
 // @match        https://chat.deepseek.com/*
 // @grant        none
 // @run-at       document-start
 // ==/UserScript==
 
 (function () {
-    'use strict';
+  'use strict';
 
-    // ==========================================
-    //  模块 1：状态管理
-    // ==========================================
-    const LS_PROMPTS_LIST = 'dse_prompts_list';
-    const LS_ACTIVE_PROMPT = 'dse_active_prompt_id';
-    const LS_AUTO_EXPERT = 'dse_auto_expert_enabled';
+  // ==========================================
+  //  模块 1：状态管理
+  // ==========================================
+  const LS_PROMPTS_LIST = 'dse_prompts_list';
+  const LS_ACTIVE_PROMPT = 'dse_active_prompt_id';
+  const LS_AUTO_EXPERT = 'dse_auto_expert_enabled';
 
-    const State = {
-        prompts: [],
-        activeId: '',
-        autoExpert: true,
+  const State = {
+    prompts: [],
+    activeId: '',
+    autoExpert: true,
 
-        init() {
-            this.migrateLegacy();
-            try {
-                this.prompts = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]');
-            } catch {
-                this.prompts = [];
-            }
-            this.activeId = localStorage.getItem(LS_ACTIVE_PROMPT) || '';
-            const expertVal = localStorage.getItem(LS_AUTO_EXPERT);
-            this.autoExpert = expertVal === null ? true : expertVal === 'true';
-        },
+    init() {
+      this.migrateLegacy();
+      try {
+        this.prompts = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]');
+      } catch {
+        this.prompts = [];
+      }
+      this.activeId = localStorage.getItem(LS_ACTIVE_PROMPT) || '';
+      const expertVal = localStorage.getItem(LS_AUTO_EXPERT);
+      this.autoExpert = expertVal === null ? true : expertVal === 'true';
+    },
 
-        save() {
-            localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(this.prompts));
-            if (this.activeId) localStorage.setItem(LS_ACTIVE_PROMPT, this.activeId);
-            else localStorage.removeItem(LS_ACTIVE_PROMPT);
-            localStorage.setItem(LS_AUTO_EXPERT, this.autoExpert);
-        },
+    save() {
+      localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(this.prompts));
+      if (this.activeId) localStorage.setItem(LS_ACTIVE_PROMPT, this.activeId);
+      else localStorage.removeItem(LS_ACTIVE_PROMPT);
+      localStorage.setItem(LS_AUTO_EXPERT, this.autoExpert);
+    },
 
-        migrateLegacy() {
-            const legacy = localStorage.getItem('dse_custom_prompt');
-            if (legacy) {
-                let list = [];
-                try { list = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]'); } catch { }
-                if (list.length === 0) {
-                    const newId = 'pr_' + Date.now();
-                    list.push({ id: newId, title: '旧版提示词', content: legacy, includeTime: false });
-                    localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(list));
-                    localStorage.setItem(LS_ACTIVE_PROMPT, newId);
-                }
-                localStorage.removeItem('dse_custom_prompt');
-            }
+    migrateLegacy() {
+      const legacy = localStorage.getItem('dse_custom_prompt');
+      if (legacy) {
+        let list = [];
+        try { list = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]'); } catch {}
+        if (list.length === 0) {
+          const newId = 'pr_' + Date.now();
+          list.push({ id: newId, title: '旧版提示词', content: legacy, includeTime: false });
+          localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(list));
+          localStorage.setItem(LS_ACTIVE_PROMPT, newId);
         }
-    };
+        localStorage.removeItem('dse_custom_prompt');
+      }
+    }
+  };
 
-    State.init();
+  State.init();
 
-    // ==========================================
-    //  模块 2：网络拦截
-    // ==========================================
-    function modifyRequest(bodyStr) {
-        if (!State.activeId) return bodyStr;
-        const p = State.prompts.find(x => x.id === State.activeId);
-        if (!p) return bodyStr;
+  // ==========================================
+  //  模块 2：网络拦截
+  // ==========================================
+  function modifyRequest(bodyStr) {
+    if (!State.activeId) return bodyStr;
+    const p = State.prompts.find(x => x.id === State.activeId);
+    if (!p) return bodyStr;
 
-        const baseContent = p.content.trim();
-        if (!baseContent) return bodyStr;
+    const baseContent = p.content.trim();
+    if (!baseContent) return bodyStr;
 
-        let customPrompt = baseContent;
-        if (p.includeTime) {
-            const timeStr = new Date().toLocaleString('zh-CN', { hour12: false });
-            customPrompt += `\n\n[系统附加信息：当前实时系统时间为 ${timeStr}]`;
-        }
-
-        try {
-            const parsed = JSON.parse(bodyStr);
-            if (parsed.prompt && typeof parsed.prompt === 'string') {
-                if (parsed.prompt.startsWith(baseContent)) return bodyStr;
-                parsed.prompt = customPrompt + '\n\n' + parsed.prompt;
-                return JSON.stringify(parsed);
-            }
-            if (parsed.messages && Array.isArray(parsed.messages)) {
-                if (parsed.messages.length > 0 && parsed.messages[0].role === 'system') {
-                    if (parsed.messages[0].content.startsWith(baseContent)) {
-                        parsed.messages[0].content = customPrompt;
-                        return JSON.stringify(parsed);
-                    }
-                }
-                parsed.messages.unshift({ role: 'system', content: customPrompt });
-                return JSON.stringify(parsed);
-            }
-        } catch { /* ignored */ }
-        return bodyStr;
+    let customPrompt = baseContent;
+    if (p.includeTime) {
+      const timeStr = new Date().toLocaleString('zh-CN', { hour12: false });
+      customPrompt += `\n\n[系统附加信息：当前实时系统时间为 ${timeStr}]`;
     }
 
-    const XHRProto = XMLHttpRequest.prototype;
-    const _origOpen = XHRProto.open;
-    const _origSend = XHRProto.send;
-    const _xhrMeta = new WeakMap();
-
-    XHRProto.open = function (method, url, ...rest) {
-        _xhrMeta.set(this, { url });
-        return _origOpen.apply(this, [method, url, ...rest]);
-    };
-    XHRProto.send = function (body) {
-        const meta = _xhrMeta.get(this);
-        if (meta && meta.url.includes('completion') && body) {
-            body = modifyRequest(body);
+    try {
+      const parsed = JSON.parse(bodyStr);
+      if (parsed.prompt && typeof parsed.prompt === 'string') {
+        if (parsed.prompt.startsWith(baseContent)) return bodyStr;
+        parsed.prompt = customPrompt + '\n\n' + parsed.prompt;
+        return JSON.stringify(parsed);
+      }
+      if (parsed.messages && Array.isArray(parsed.messages)) {
+        if (parsed.messages.length > 0 && parsed.messages[0].role === 'system') {
+          if (parsed.messages[0].content.startsWith(baseContent)) {
+            parsed.messages[0].content = customPrompt;
+            return JSON.stringify(parsed);
+          }
         }
-        return _origSend.apply(this, [body]);
-    };
-    const _origFetch = window.fetch;
-    window.fetch = async function (...args) {
-        const url = (typeof args[0] === 'string') ? args[0] : args[0]?.url;
-        if (url && url.includes('completion') && args[1]?.body) {
-            args[1].body = modifyRequest(args[1].body);
-        }
-        return _origFetch.apply(this, args);
-    };
+        parsed.messages.unshift({ role: 'system', content: customPrompt });
+        return JSON.stringify(parsed);
+      }
+    } catch { /* ignored */ }
+    return bodyStr;
+  }
 
-    // ==========================================
-    //  模块 3：UI 构建与渲染
-    // ==========================================
-    function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+  const XHRProto = XMLHttpRequest.prototype;
+  const _origOpen = XHRProto.open;
+  const _origSend = XHRProto.send;
+  const _xhrMeta = new WeakMap();
 
-    function toast(msg, type = 'info') {
-        const el = document.createElement('div');
-        // 修复：Toast 的背景也切换为支持暗黑模式的官方变量
-        el.style.cssText = `position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px) scale(0.95);z-index:1000001;background:var(--dsw-alias-toast-bg, var(--dsw-alias-bg-layer-3, #fff));color:var(--dsw-alias-label-primary, #1a1a1a);padding:12px 24px;border-radius:99px;font-size:14px;font-weight:500;box-shadow:var(--dsw-shadow-lv3, 0 12px 32px rgba(0,0,0,0.12));border:1px solid var(--dsw-alias-border-l2);font-family:inherit;transition:all 0.4s cubic-bezier(0.16, 1, 0.3, 1); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px;`;
-
-        let icon = '';
-        if (type === 'success') {
-            icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-success-primary, #22c55e)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-.997-6l7.07-7.071-1.414-1.414-5.656 5.657-2.829-2.829-1.414 1.414L11.003 16z"/></svg>`;
-        } else if (type === 'error') {
-            icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-error-primary, #ef4444)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1-7v2h2v-2h-2zm0-8v6h2V7h-2z"/></svg>`;
-        }
-        el.innerHTML = `${icon} <span>${msg}</span>`;
-
-        document.body.appendChild(el);
-        requestAnimationFrame(() => { el.style.transform = 'translateX(-50%) translateY(0) scale(1)'; el.style.opacity = '1'; });
-        setTimeout(() => {
-            el.style.opacity = '0'; el.style.transform = 'translateX(-50%) translateY(-15px) scale(0.95)';
-            setTimeout(() => el.remove(), 400);
-        }, 2500);
+  XHRProto.open = function (method, url, ...rest) {
+    _xhrMeta.set(this, { url });
+    return _origOpen.apply(this, [method, url, ...rest]);
+  };
+  XHRProto.send = function (body) {
+    const meta = _xhrMeta.get(this);
+    if (meta && meta.url.includes('completion') && body) {
+      body = modifyRequest(body);
     }
+    return _origSend.apply(this, [body]);
+  };
+  const _origFetch = window.fetch;
+  window.fetch = async function (...args) {
+    const url = (typeof args[0] === 'string') ? args[0] : args[0]?.url;
+    if (url && url.includes('completion') && args[1]?.body) {
+      args[1].body = modifyRequest(args[1].body);
+    }
+    return _origFetch.apply(this, args);
+  };
 
-    const style = document.createElement('style');
-    style.textContent = `
+  // ==========================================
+  //  模块 3：UI 构建与渲染
+  // ==========================================
+  function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+function toast(msg, type = 'info') {
+    const el = document.createElement('div');
+    // 修复：将 background 改为 var(--dsw-alias-bg-layer-1, #ffffff)，使其与页面主题完美同步，告别反色导致的黑底黑字
+    el.style.cssText = `position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px) scale(0.95);z-index:1000001;background:var(--dsw-alias-bg-layer-1, #ffffff);color:var(--dsw-alias-label-primary, #1a1a1a);padding:12px 24px;border-radius:99px;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,0.12);border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.08));font-family:inherit;transition:all 0.4s cubic-bezier(0.16, 1, 0.3, 1); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px;`;
+    let icon = '';
+    if (type === 'success') {
+      icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-success-primary, #22c55e)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-.997-6l7.07-7.071-1.414-1.414-5.656 5.657-2.829-2.829-1.414 1.414L11.003 16z"/></svg>`;
+    } else if (type === 'error') {
+      icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-error-primary, #ef4444)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1-7v2h2v-2h-2zm0-8v6h2V7h-2z"/></svg>`;
+    }
+    el.innerHTML = `${icon} <span>${msg}</span>`;
+
+    document.body.appendChild(el);
+    requestAnimationFrame(() => { el.style.transform = 'translateX(-50%) translateY(0) scale(1)'; el.style.opacity = '1'; });
+    setTimeout(() => {
+      el.style.opacity = '0'; el.style.transform = 'translateX(-50%) translateY(-15px) scale(0.95)';
+      setTimeout(() => el.remove(), 400);
+    }, 2500);
+  }
+
+  const style = document.createElement('style');
+  style.textContent = `
     #dsp-modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.2); z-index: 999997; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
     #dsp-modal-overlay.open { opacity: 1; pointer-events: auto; }
 
@@ -270,7 +268,7 @@
     .dsp-native-pill.active #dsp-open-panel-btn { color: var(--dsw-alias-brand-text, #4d6bfe); }
     .dsp-native-pill.active #dsp-open-panel-btn:hover { background: var(--dsw-alias-interactive-bg-hover-accent, rgba(77, 107, 254, 0.1)); }
 
-    /* Dropdown - 修复：强制使用 DeepSeek 官方层级变量实现暗黑背景自适应 */
+    /* Dropdown */
     .dsp-global-menu { position: fixed; background: var(--dsw-specific-menu, var(--dsw-alias-bg-layer-3, #fff)); border: 1px solid var(--dsw-alias-border-l2); border-radius: 14px; box-shadow: var(--dsw-shadow-lv3, 0 12px 32px rgba(0,0,0,0.12)); min-width: 170px; max-height: 280px; overflow-y: auto; z-index: 9999999; display: none; flex-direction: column; padding: 8px; }
     .dsp-global-menu.open { display: flex; }
     .dsp-global-menu::-webkit-scrollbar { width: 4px; }
@@ -281,16 +279,16 @@
     .dsp-custom-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.04)); transform: translateX(2px); }
     .dsp-custom-menu-item.active { color: var(--dsw-alias-brand-text); background: var(--dsw-alias-button-ghost-active-fill); }
   `;
-    document.head.appendChild(style);
+  document.head.appendChild(style);
 
-    const overlay = document.createElement('div');
-    overlay.id = 'dsp-modal-overlay';
-    document.body.appendChild(overlay);
+  const overlay = document.createElement('div');
+  overlay.id = 'dsp-modal-overlay';
+  document.body.appendChild(overlay);
 
-    const panel = document.createElement('div');
-    panel.id = 'dsp-panel';
+  const panel = document.createElement('div');
+  panel.id = 'dsp-panel';
 
-    panel.innerHTML = `
+  panel.innerHTML = `
     <div class="hd">
       <h3>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--dsw-alias-brand-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
@@ -352,65 +350,65 @@
       </div>
     </div>
   `;
-    document.body.appendChild(panel);
+  document.body.appendChild(panel);
 
-    const globalMenu = document.createElement('div');
-    globalMenu.id = 'dsp-global-dropdown-menu';
-    globalMenu.className = 'dsp-global-menu';
-    document.body.appendChild(globalMenu);
+  const globalMenu = document.createElement('div');
+  globalMenu.id = 'dsp-global-dropdown-menu';
+  globalMenu.className = 'dsp-global-menu';
+  document.body.appendChild(globalMenu);
 
-    function togglePanel(show) {
-        if (show) {
-            panel.classList.add('open');
-            overlay.classList.add('open');
-            globalMenu.classList.remove('open');
-            document.getElementById('dsp-auto-expert-cb').checked = State.autoExpert;
-        } else {
-            panel.classList.remove('open');
-            overlay.classList.remove('open');
-        }
+  function togglePanel(show) {
+    if (show) {
+      panel.classList.add('open');
+      overlay.classList.add('open');
+      globalMenu.classList.remove('open');
+      document.getElementById('dsp-auto-expert-cb').checked = State.autoExpert;
+    } else {
+      panel.classList.remove('open');
+      overlay.classList.remove('open');
     }
+  }
 
-    panel.querySelector('.cls').onclick = () => togglePanel(false);
-    overlay.onclick = () => togglePanel(false);
+  panel.querySelector('.cls').onclick = () => togglePanel(false);
+  overlay.onclick = () => togglePanel(false);
 
-    document.getElementById('dsp-auto-expert-cb').addEventListener('change', (e) => {
-        State.autoExpert = e.target.checked;
-        State.save();
-        toast(State.autoExpert ? '已开启：自动激活专家模式' : '已关闭：自动激活', 'success');
-    });
+  document.getElementById('dsp-auto-expert-cb').addEventListener('change', (e) => {
+    State.autoExpert = e.target.checked;
+    State.save();
+    toast(State.autoExpert ? '已开启：自动激活专家模式' : '已关闭：自动激活', 'success');
+  });
 
-    const promptListEl = panel.querySelector('#prompt-list');
-    const promptEditArea = panel.querySelector('#prompt-edit-area');
-    const promptEditId = panel.querySelector('#prompt-edit-id');
-    const promptEditTitle = panel.querySelector('#prompt-edit-title');
-    const promptEditContent = panel.querySelector('#prompt-edit-content');
-    const promptEditTime = panel.querySelector('#prompt-edit-time');
+  const promptListEl = panel.querySelector('#prompt-list');
+  const promptEditArea = panel.querySelector('#prompt-edit-area');
+  const promptEditId = panel.querySelector('#prompt-edit-id');
+  const promptEditTitle = panel.querySelector('#prompt-edit-title');
+  const promptEditContent = panel.querySelector('#prompt-edit-content');
+  const promptEditTime = panel.querySelector('#prompt-edit-time');
 
-    window.dsSelectPrompt = function (id) {
-        State.activeId = id;
-        State.save();
-        renderUI();
-        globalMenu.classList.remove('open');
-        toast('指令已生效', 'success');
-    };
+  window.dsSelectPrompt = function(id) {
+    State.activeId = id;
+    State.save();
+    renderUI();
+    globalMenu.classList.remove('open');
+    toast('指令已生效', 'success');
+  };
 
-    function renderUI() {
-        const list = State.prompts;
-        const activeId = State.activeId;
-        const fragPanel = document.createDocumentFragment();
+  function renderUI() {
+    const list = State.prompts;
+    const activeId = State.activeId;
+    const fragPanel = document.createDocumentFragment();
 
-        if (!list.length) {
-            promptListEl.innerHTML = '<div style="color:var(--dsw-alias-label-tertiary);font-size:14px;padding:48px 16px;text-align:center;background:var(--dsw-alias-bg-layer-1);border-radius:16px;border:2px dashed var(--dsw-alias-border-l2);">✨ 还没有属于你的独家指令哦，点击右上角新建吧</div>';
-        } else {
-            promptListEl.innerHTML = '';
-            list.forEach(p => {
-                const row = document.createElement('div');
-                row.className = 'dsp-prompt-item';
+    if (!list.length) {
+      promptListEl.innerHTML = '<div style="color:var(--dsw-alias-label-tertiary);font-size:14px;padding:48px 16px;text-align:center;background:var(--dsw-alias-bg-layer-1);border-radius:16px;border:2px dashed var(--dsw-alias-border-l2);">✨ 还没有属于你的独家指令哦，点击右上角新建吧</div>';
+    } else {
+      promptListEl.innerHTML = '';
+      list.forEach(p => {
+        const row = document.createElement('div');
+        row.className = 'dsp-prompt-item';
 
-                const timeBadge = p.includeTime ? `<span class="dsp-badge-time"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2 2"></path><path d="M5 3L2 6"></path><path d="M19 3l3 3"></path></svg>动态时间</span>` : '';
+        const timeBadge = p.includeTime ? `<span class="dsp-badge-time"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2 2"></path><path d="M5 3L2 6"></path><path d="M19 3l3 3"></path></svg>动态时间</span>` : '';
 
-                row.innerHTML = `
+        row.innerHTML = `
           <div class="dsp-prompt-header">
             <div style="display:flex;align-items:center;">
               <span class="dsp-prompt-title">${esc(p.title)}</span>
@@ -423,103 +421,103 @@
           </div>
           <div class="dsp-prompt-preview">${esc(p.content)}</div>
         `;
-                row.querySelector('.edit').onclick = () => openPromptEditor(p);
-                row.querySelector('.del').onclick = () => deletePrompt(p.id);
-                fragPanel.appendChild(row);
-            });
-            promptListEl.appendChild(fragPanel);
-        }
-
-        const fragMenu = document.createDocumentFragment();
-        let activeTitle = "无 (纯净对话)";
-
-        const nullItem = document.createElement('div');
-        nullItem.className = 'dsp-custom-menu-item' + (!activeId ? ' active' : '');
-        nullItem.innerHTML = '无 (纯净对话)';
-        nullItem.onclick = () => window.dsSelectPrompt('');
-        fragMenu.appendChild(nullItem);
-
-        list.forEach(p => {
-            const item = document.createElement('div');
-            item.className = 'dsp-custom-menu-item' + (p.id === activeId ? ' active' : '');
-            item.textContent = p.title;
-            item.onclick = () => window.dsSelectPrompt(p.id);
-            fragMenu.appendChild(item);
-            if (p.id === activeId) activeTitle = p.title;
-        });
-
-        globalMenu.innerHTML = '';
-        globalMenu.appendChild(fragMenu);
-
-        const nativeQsText = document.getElementById('dsp-qs-text');
-        const nativePill = document.getElementById('dsp-pill-container');
-
-        if (nativeQsText) nativeQsText.textContent = activeTitle;
-        if (nativePill) {
-            if (activeId) nativePill.classList.add('active');
-            else nativePill.classList.remove('active');
-        }
+        row.querySelector('.edit').onclick = () => openPromptEditor(p);
+        row.querySelector('.del').onclick = () => deletePrompt(p.id);
+        fragPanel.appendChild(row);
+      });
+      promptListEl.appendChild(fragPanel);
     }
 
-    panel.querySelector('#prompt-new-btn').onclick = () => openPromptEditor(null);
-    panel.querySelector('#prompt-edit-cancel').onclick = () => { promptEditArea.style.display = 'none'; };
+    const fragMenu = document.createDocumentFragment();
+    let activeTitle = "无 (纯净对话)";
 
-    panel.querySelector('#prompt-edit-save').onclick = () => {
-        const title = promptEditTitle.value.trim();
-        const content = promptEditContent.value.trim();
-        const includeTime = promptEditTime.checked;
+    const nullItem = document.createElement('div');
+    nullItem.className = 'dsp-custom-menu-item' + (!activeId ? ' active' : '');
+    nullItem.innerHTML = '无 (纯净对话)';
+    nullItem.onclick = () => window.dsSelectPrompt('');
+    fragMenu.appendChild(nullItem);
 
-        if (!title || !content) { toast('标题和内容均不能为空哦', 'error'); return; }
+    list.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'dsp-custom-menu-item' + (p.id === activeId ? ' active' : '');
+      item.textContent = p.title;
+      item.onclick = () => window.dsSelectPrompt(p.id);
+      fragMenu.appendChild(item);
+      if (p.id === activeId) activeTitle = p.title;
+    });
 
-        const id = promptEditId.value;
-        if (id) {
-            const p = State.prompts.find(x => x.id === id);
-            if (p) { p.title = title; p.content = content; p.includeTime = includeTime; }
-        } else {
-            const newId = 'pr_' + Date.now();
-            State.prompts.push({ id: newId, title, content, includeTime });
-            if (!State.activeId) State.activeId = newId;
-        }
+    globalMenu.innerHTML = '';
+    globalMenu.appendChild(fragMenu);
 
-        State.save();
-        promptEditArea.style.display = 'none';
-        renderUI();
-        toast('保存成功，指令已就绪', 'success');
-    };
+    const nativeQsText = document.getElementById('dsp-qs-text');
+    const nativePill = document.getElementById('dsp-pill-container');
 
-    function openPromptEditor(p) {
-        promptEditArea.style.display = 'block';
-        if (p) {
-            promptEditId.value = p.id;
-            promptEditTitle.value = p.title;
-            promptEditContent.value = p.content;
-            promptEditTime.checked = !!p.includeTime;
-        } else {
-            promptEditId.value = '';
-            promptEditTitle.value = '';
-            promptEditContent.value = '';
-            promptEditTime.checked = false;
-        }
-        setTimeout(() => { promptEditArea.scrollIntoView({ behavior: 'smooth', block: 'end' }); promptEditTitle.focus(); }, 50);
+    if (nativeQsText) nativeQsText.textContent = activeTitle;
+    if (nativePill) {
+      if (activeId) nativePill.classList.add('active');
+      else nativePill.classList.remove('active');
+    }
+  }
+
+  panel.querySelector('#prompt-new-btn').onclick = () => openPromptEditor(null);
+  panel.querySelector('#prompt-edit-cancel').onclick = () => { promptEditArea.style.display = 'none'; };
+
+  panel.querySelector('#prompt-edit-save').onclick = () => {
+    const title = promptEditTitle.value.trim();
+    const content = promptEditContent.value.trim();
+    const includeTime = promptEditTime.checked;
+
+    if (!title || !content) { toast('标题和内容均不能为空哦', 'error'); return; }
+
+    const id = promptEditId.value;
+    if (id) {
+      const p = State.prompts.find(x => x.id === id);
+      if (p) { p.title = title; p.content = content; p.includeTime = includeTime; }
+    } else {
+      const newId = 'pr_' + Date.now();
+      State.prompts.push({ id: newId, title, content, includeTime });
+      if (!State.activeId) State.activeId = newId;
     }
 
-    function deletePrompt(id) {
-        if (!confirm('确定要删除这条精心编写的指令吗？')) return;
-        State.prompts = State.prompts.filter(x => x.id !== id);
-        State.save();
-        if (State.activeId === id) State.activeId = '';
-        renderUI();
-        toast('指令已清理', 'info');
+    State.save();
+    promptEditArea.style.display = 'none';
+    renderUI();
+    toast('保存成功，指令已就绪', 'success');
+  };
+
+  function openPromptEditor(p) {
+    promptEditArea.style.display = 'block';
+    if (p) {
+      promptEditId.value = p.id;
+      promptEditTitle.value = p.title;
+      promptEditContent.value = p.content;
+      promptEditTime.checked = !!p.includeTime;
+    } else {
+      promptEditId.value = '';
+      promptEditTitle.value = '';
+      promptEditContent.value = '';
+      promptEditTime.checked = false;
     }
+    setTimeout(() => { promptEditArea.scrollIntoView({ behavior: 'smooth', block: 'end' }); promptEditTitle.focus(); }, 50);
+  }
 
-    function injectNativeControls(container, targetNode) {
-        const existing = document.getElementById('dsp-native-wrapper');
-        if (existing) existing.remove();
+  function deletePrompt(id) {
+    if (!confirm('确定要删除这条精心编写的指令吗？')) return;
+    State.prompts = State.prompts.filter(x => x.id !== id);
+    State.save();
+    if (State.activeId === id) State.activeId = '';
+    renderUI();
+    toast('指令已清理', 'info');
+  }
 
-        const wrapper = document.createElement('div');
-        wrapper.id = 'dsp-native-wrapper';
+  function injectNativeControls(container, targetNode) {
+    const existing = document.getElementById('dsp-native-wrapper');
+    if (existing) existing.remove();
 
-        wrapper.innerHTML = `
+    const wrapper = document.createElement('div');
+    wrapper.id = 'dsp-native-wrapper';
+
+    wrapper.innerHTML = `
       <div class="dsp-native-pill" id="dsp-pill-container">
         <div class="dsp-visual-box" id="dsp-custom-dropdown-trigger">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
@@ -548,96 +546,131 @@
       </div>
     `;
 
-        if (targetNode && targetNode.nextSibling) {
-            container.insertBefore(wrapper, targetNode.nextSibling);
-        } else {
-            container.appendChild(wrapper);
-        }
-
-        const trigger = wrapper.querySelector('#dsp-custom-dropdown-trigger');
-        trigger.onclick = (e) => {
-            e.stopPropagation();
-            if (globalMenu.classList.contains('open')) {
-                globalMenu.classList.remove('open');
-                return;
-            }
-            const rect = trigger.getBoundingClientRect();
-            const spaceBelow = window.innerHeight - rect.bottom;
-            globalMenu.style.left = rect.left + 'px';
-            if (spaceBelow < 250) {
-                globalMenu.style.top = 'auto';
-                globalMenu.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
-                globalMenu.style.transformOrigin = 'bottom left';
-                globalMenu.style.animation = 'dsp-dropup-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
-            } else {
-                globalMenu.style.top = (rect.bottom + 8) + 'px';
-                globalMenu.style.bottom = 'auto';
-                globalMenu.style.transformOrigin = 'top left';
-                globalMenu.style.animation = 'dsp-dropdown-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
-            }
-            globalMenu.classList.add('open');
-        };
-
-        wrapper.querySelector('#dsp-open-panel-btn').onclick = () => togglePanel(true);
-        renderUI();
+    if (targetNode && targetNode.nextSibling) {
+      container.insertBefore(wrapper, targetNode.nextSibling);
+    } else {
+      container.appendChild(wrapper);
     }
 
-    document.addEventListener('click', (e) => {
-        const trigger = document.getElementById('dsp-custom-dropdown-trigger');
-        if (globalMenu.classList.contains('open')) {
-            if ((!trigger || !trigger.contains(e.target)) && !globalMenu.contains(e.target)) {
-                globalMenu.classList.remove('open');
-            }
-        }
-    }, { passive: true });
+    const trigger = wrapper.querySelector('#dsp-custom-dropdown-trigger');
+    trigger.onclick = (e) => {
+      e.stopPropagation();
+      if (globalMenu.classList.contains('open')) {
+        globalMenu.classList.remove('open');
+        return;
+      }
+      const rect = trigger.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      globalMenu.style.left = rect.left + 'px';
+      if (spaceBelow < 250) {
+        globalMenu.style.top = 'auto';
+        globalMenu.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+        globalMenu.style.transformOrigin = 'bottom left';
+        globalMenu.style.animation = 'dsp-dropup-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+      } else {
+        globalMenu.style.top = (rect.bottom + 8) + 'px';
+        globalMenu.style.bottom = 'auto';
+        globalMenu.style.transformOrigin = 'top left';
+        globalMenu.style.animation = 'dsp-dropdown-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+      }
+      globalMenu.classList.add('open');
+    };
 
-    window.addEventListener('scroll', () => {
-        if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
-    }, { capture: true, passive: true });
+    wrapper.querySelector('#dsp-open-panel-btn').onclick = () => togglePanel(true);
+    renderUI();
+  }
 
-    window.addEventListener('resize', () => {
-        if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
-    }, { passive: true });
+  // ==========================================
+  //  模块 4：专家模式智能控制 (完美接管)
+  // ==========================================
+  let manualOverride = false;
+  let lastUrl = location.href;
 
-    function startNativeObserver() {
-        let isObserving = false;
-        const observer = new MutationObserver(() => {
-            if (isObserving) return;
-            isObserving = true;
-            requestAnimationFrame(() => {
-                isObserving = false;
+  function checkAndSwitchExpertMode() {
+    if (!State.autoExpert) return; // 遵循用户UI设置面板的意愿
 
-                if (State.autoExpert) {
-                    const expertBtn = document.querySelector('div[data-model-type="expert"][role="radio"]');
-                    if (expertBtn && !expertBtn.dataset.dseAutoSet) {
-                        expertBtn.dataset.dseAutoSet = 'true';
-                        if (expertBtn.getAttribute('aria-checked') !== 'true') {
-                            expertBtn.click();
-                        }
-                    }
-                }
-
-                if (!document.getElementById('dsp-native-wrapper')) {
-                    let targetBtn = null;
-                    const spans = document.querySelectorAll('span._6dbc175, span');
-                    for (let s of spans) {
-                        if (s.textContent.includes('智能搜索') || s.textContent.includes('深度思考')) {
-                            const btn = s.closest('div[role="button"]');
-                            if (btn) targetBtn = btn;
-                        }
-                    }
-                    if (targetBtn && targetBtn.parentNode) {
-                        injectNativeControls(targetBtn.parentNode, targetBtn);
-                    }
-                }
-            });
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
+    // URL变化（如开启新对话），重置状态接管控制权
+    if (lastUrl !== location.href) {
+      lastUrl = location.href;
+      manualOverride = false;
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
-        renderUI();
-        startNativeObserver();
-        console.log('[DS Prompt Manager] V4.2 Loaded (Dark Mode Fully Supported)');
+    // 如果用户在当前对话中手动修改过模式，脚本停止干预
+    if (manualOverride) return;
+
+    const expert = document.querySelector('div[data-model-type="expert"][role="radio"]');
+    const quick = document.querySelector('div[data-model-type="default"][role="radio"]');
+
+    if (expert && quick && quick.getAttribute('aria-checked') === 'true') {
+      expert.click();
+    }
+  }
+
+  setInterval(checkAndSwitchExpertMode, 500);
+
+  // 监听用户事件以锁定人工意愿
+  document.addEventListener('click', (e) => {
+    if (globalMenu.classList.contains('open')) {
+      const trigger = document.getElementById('dsp-custom-dropdown-trigger');
+      if ((!trigger || !trigger.contains(e.target)) && !globalMenu.contains(e.target)) {
+        globalMenu.classList.remove('open');
+      }
+    }
+
+    if (!State.autoExpert) return;
+
+    // 动作A：用户手动点击了模式切换
+    const isModelSwitch = e.target.closest('div[data-model-type]');
+    if (isModelSwitch) {
+      manualOverride = true;
+    }
+
+    // 动作B：用户点击了“新建对话”相关按钮 (作为URL变动的有效兜底)
+    const btn = e.target.closest('div[role="button"]');
+    if (btn && (btn.innerText.includes('新对话') || btn.innerText.includes('New'))) {
+      manualOverride = false;
+    }
+  }, { passive: true, capture: true });
+
+  window.addEventListener('scroll', () => {
+    if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
+  }, { capture: true, passive: true });
+
+  window.addEventListener('resize', () => {
+    if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
+  }, { passive: true });
+
+  function startNativeObserver() {
+    let isObserving = false;
+    const observer = new MutationObserver(() => {
+      if (isObserving) return;
+      isObserving = true;
+      requestAnimationFrame(() => {
+        isObserving = false;
+
+        // （旧的自动点击逻辑已被彻底替换到 模块4 定时器中，此处不再需要引起冲突的代码）
+
+        if (!document.getElementById('dsp-native-wrapper')) {
+          let targetBtn = null;
+          const spans = document.querySelectorAll('span._6dbc175, span');
+          for (let s of spans) {
+            if (s.textContent.includes('智能搜索') || s.textContent.includes('深度思考')) {
+               const btn = s.closest('div[role="button"]');
+               if (btn) targetBtn = btn;
+            }
+          }
+          if (targetBtn && targetBtn.parentNode) {
+            injectNativeControls(targetBtn.parentNode, targetBtn);
+          }
+        }
+      });
     });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  window.addEventListener('DOMContentLoaded', () => {
+    renderUI();
+    startNativeObserver();
+    console.log('[DS Prompt Manager] V4.3 Loaded (Dark Mode Fully Supported & Expert Switch Optimized)');
+  });
 })();
