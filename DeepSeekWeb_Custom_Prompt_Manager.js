@@ -1,155 +1,246 @@
 // ==UserScript==
 // @name         DeepSeek Custom Prompt Manager
-// @version      1.1.0
-// @description  DeepSeek 提示词管理：修复默认专家模式逻辑及深浅色切换问题。
-// @author       Mia0a (Optimized)
+// @version      1.1.1
+// @description  DeepSeek 提示词管理：修复默认专家模式逻辑及深浅色切换问题，全面兼容 DeepSeek 最新 API 结构。
+// @author       Mia0a 
+// @license      GPL-3.0-or-later
 // @match        https://chat.deepseek.com/*
 // @grant        none
 // @run-at       document-start
 // ==/UserScript==
 
 (function () {
-  'use strict';
+    'use strict';
 
-  // ==========================================
-  //  模块 1：状态管理
-  // ==========================================
-  const LS_PROMPTS_LIST = 'dse_prompts_list';
-  const LS_ACTIVE_PROMPT = 'dse_active_prompt_id';
-  const LS_AUTO_EXPERT = 'dse_auto_expert_enabled';
+    // ==========================================
+    //  模块 1：状态管理
+    // ==========================================
+    const LS_PROMPTS_LIST = 'dse_prompts_list';
+    const LS_ACTIVE_PROMPT = 'dse_active_prompt_id';
+    const LS_AUTO_EXPERT = 'dse_auto_expert_enabled';
 
-  const State = {
-    prompts: [],
-    activeId: '',
-    autoExpert: true,
+    const State = {
+        prompts: [],
+        activeId: '',
+        autoExpert: true,
 
-    init() {
-      this.migrateLegacy();
-      try {
-        this.prompts = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]');
-      } catch {
-        this.prompts = [];
-      }
-      this.activeId = localStorage.getItem(LS_ACTIVE_PROMPT) || '';
-      const expertVal = localStorage.getItem(LS_AUTO_EXPERT);
-      this.autoExpert = expertVal === null ? true : expertVal === 'true';
-    },
+        init() {
+            this.migrateLegacy();
+            try {
+                this.prompts = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]');
+            } catch {
+                this.prompts = [];
+            }
+            this.activeId = localStorage.getItem(LS_ACTIVE_PROMPT) || '';
+            const expertVal = localStorage.getItem(LS_AUTO_EXPERT);
+            this.autoExpert = expertVal === null ? true : expertVal === 'true';
+        },
 
-    save() {
-      localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(this.prompts));
-      if (this.activeId) localStorage.setItem(LS_ACTIVE_PROMPT, this.activeId);
-      else localStorage.removeItem(LS_ACTIVE_PROMPT);
-      localStorage.setItem(LS_AUTO_EXPERT, this.autoExpert);
-    },
+        save() {
+            localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(this.prompts));
+            if (this.activeId) localStorage.setItem(LS_ACTIVE_PROMPT, this.activeId);
+            else localStorage.removeItem(LS_ACTIVE_PROMPT);
+            localStorage.setItem(LS_AUTO_EXPERT, this.autoExpert);
+        },
 
-    migrateLegacy() {
-      const legacy = localStorage.getItem('dse_custom_prompt');
-      if (legacy) {
-        let list = [];
-        try { list = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]'); } catch {}
-        if (list.length === 0) {
-          const newId = 'pr_' + Date.now();
-          list.push({ id: newId, title: '旧版提示词', content: legacy, includeTime: false });
-          localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(list));
-          localStorage.setItem(LS_ACTIVE_PROMPT, newId);
+        migrateLegacy() {
+            const legacy = localStorage.getItem('dse_custom_prompt');
+            if (legacy) {
+                let list = [];
+                try { list = JSON.parse(localStorage.getItem(LS_PROMPTS_LIST) || '[]'); } catch { }
+                if (list.length === 0) {
+                    const newId = 'pr_' + Date.now();
+                    list.push({ id: newId, title: '旧版提示词', content: legacy, includeTime: false });
+                    localStorage.setItem(LS_PROMPTS_LIST, JSON.stringify(list));
+                    localStorage.setItem(LS_ACTIVE_PROMPT, newId);
+                }
+                localStorage.removeItem('dse_custom_prompt');
+            }
         }
-        localStorage.removeItem('dse_custom_prompt');
-      }
-    }
-  };
+    };
 
-  State.init();
+    State.init();
 
-  // ==========================================
-  //  模块 2：网络拦截
-  // ==========================================
-  function modifyRequest(bodyStr) {
-    if (!State.activeId) return bodyStr;
-    const p = State.prompts.find(x => x.id === State.activeId);
-    if (!p) return bodyStr;
+    // ==========================================
+    //  模块 2：网络拦截
+    // ==========================================
+    function modifyRequest(bodyStr) {
+        if (!State.activeId) return bodyStr;
+        const p = State.prompts.find(x => x.id === State.activeId);
+        if (!p) return bodyStr;
 
-    const baseContent = p.content.trim();
-    if (!baseContent) return bodyStr;
+        const baseContent = p.content.trim();
+        if (!baseContent) return bodyStr;
 
-    let customPrompt = baseContent;
-    if (p.includeTime) {
-      const timeStr = new Date().toLocaleString('zh-CN', { hour12: false });
-      customPrompt += `\n\n[系统附加信息：当前实时系统时间为 ${timeStr}]`;
-    }
-
-    try {
-      const parsed = JSON.parse(bodyStr);
-      if (parsed.prompt && typeof parsed.prompt === 'string') {
-        if (parsed.prompt.startsWith(baseContent)) return bodyStr;
-        parsed.prompt = customPrompt + '\n\n' + parsed.prompt;
-        return JSON.stringify(parsed);
-      }
-      if (parsed.messages && Array.isArray(parsed.messages)) {
-        if (parsed.messages.length > 0 && parsed.messages[0].role === 'system') {
-          if (parsed.messages[0].content.startsWith(baseContent)) {
-            parsed.messages[0].content = customPrompt;
-            return JSON.stringify(parsed);
-          }
+        let customPrompt = baseContent;
+        if (p.includeTime) {
+            const timeStr = new Date().toLocaleString('zh-CN', { hour12: false });
+            customPrompt += `\n\n[系统附加信息：当前实时系统时间为 ${timeStr}]`;
         }
-        parsed.messages.unshift({ role: 'system', content: customPrompt });
-        return JSON.stringify(parsed);
-      }
-    } catch { /* ignored */ }
-    return bodyStr;
-  }
 
-  const XHRProto = XMLHttpRequest.prototype;
-  const _origOpen = XHRProto.open;
-  const _origSend = XHRProto.send;
-  const _xhrMeta = new WeakMap();
+        try {
+            const parsed = JSON.parse(bodyStr);
+            let modified = false;
 
-  XHRProto.open = function (method, url, ...rest) {
-    _xhrMeta.set(this, { url });
-    return _origOpen.apply(this, [method, url, ...rest]);
-  };
-  XHRProto.send = function (body) {
-    const meta = _xhrMeta.get(this);
-    if (meta && meta.url.includes('completion') && body) {
-      body = modifyRequest(body);
+            // 处理多种可能的 prompt 字段名称 (兼容最新 API 和不同的请求结构)
+            if (parsed.prompt && typeof parsed.prompt === 'string' && !parsed.prompt.startsWith(baseContent)) {
+                parsed.prompt = customPrompt + '\n\n' + parsed.prompt;
+                modified = true;
+            }
+            if (parsed.message && typeof parsed.message === 'string' && !parsed.message.startsWith(baseContent)) {
+                parsed.message = customPrompt + '\n\n' + parsed.message;
+                modified = true;
+            }
+            if (parsed.content && typeof parsed.content === 'string' && !parsed.content.startsWith(baseContent)) {
+                parsed.content = customPrompt + '\n\n' + parsed.content;
+                modified = true;
+            }
+
+            // 处理 messages 数组
+            if (parsed.messages && Array.isArray(parsed.messages) && parsed.messages.length > 0) {
+                if (parsed.messages[0].role === 'system') {
+                    if (typeof parsed.messages[0].content === 'string' && !parsed.messages[0].content.startsWith(baseContent)) {
+                        parsed.messages[0].content = customPrompt + '\n\n' + parsed.messages[0].content;
+                        modified = true;
+                    }
+                } else {
+                    const firstUser = parsed.messages.find(m => m.role === 'user');
+                    if (firstUser && typeof firstUser.content === 'string' && !firstUser.content.startsWith(baseContent)) {
+                        parsed.messages.unshift({ role: 'system', content: customPrompt });
+                        modified = true;
+                    }
+                }
+            }
+
+            if (modified) {
+                return JSON.stringify(parsed);
+            }
+        } catch { /* ignored */ }
+        return bodyStr;
     }
-    return _origSend.apply(this, [body]);
-  };
-  const _origFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const url = (typeof args[0] === 'string') ? args[0] : args[0]?.url;
-    if (url && url.includes('completion') && args[1]?.body) {
-      args[1].body = modifyRequest(args[1].body);
+
+    const XHRProto = XMLHttpRequest.prototype;
+    const _origOpen = XHRProto.open;
+    const _origSend = XHRProto.send;
+    const _xhrMeta = new WeakMap();
+
+    XHRProto.open = function (method, url, ...rest) {
+        _xhrMeta.set(this, { url: String(url) });
+        return _origOpen.apply(this, [method, url, ...rest]);
+    };
+    XHRProto.send = function (body) {
+        try {
+            const meta = _xhrMeta.get(this);
+            if (meta && meta.url && (meta.url.includes('completion') || meta.url.includes('chat') || meta.url.includes('message')) && body) {
+                if (typeof body === 'string') {
+                    body = modifyRequest(body);
+                } else if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+                    try {
+                        const text = new TextDecoder('utf-8').decode(body);
+                        const newText = modifyRequest(text);
+                        if (newText !== text) {
+                            body = new TextEncoder().encode(newText);
+                        }
+                    } catch (e) { }
+                }
+            }
+        } catch (e) {
+            console.error('[DS Prompt Manager] XHR Intercept Error:', e);
+        }
+        return _origSend.apply(this, [body]);
+    };
+
+    const _origFetch = window.fetch;
+    window.fetch = async function (...args) {
+        try {
+            let request = args[0];
+            let options = args[1];
+
+            let url = '';
+            let body = null;
+            let isRequestObj = false;
+
+            if (request instanceof Request) {
+                url = request.url;
+                isRequestObj = true;
+                if (!options || options.body === undefined) {
+                    try {
+                        const clone = request.clone();
+                        body = await clone.text();
+                    } catch (e) {
+                        body = null;
+                    }
+                } else {
+                    body = options.body;
+                }
+            } else {
+                url = typeof request === 'string' ? request : (request?.url || '');
+                body = options?.body;
+            }
+
+            if (url && (url.includes('completion') || url.includes('chat') || url.includes('message')) && body) {
+                let textBody = null;
+                let isBinary = false;
+
+                if (typeof body === 'string') {
+                    textBody = body;
+                } else if (body instanceof Uint8Array || body instanceof ArrayBuffer) {
+                    try {
+                        textBody = new TextDecoder('utf-8').decode(body);
+                        isBinary = true;
+                    } catch (e) { }
+                }
+
+                if (textBody) {
+                    const newBody = modifyRequest(textBody);
+                    if (newBody !== textBody) {
+                        const finalBody = isBinary ? new TextEncoder().encode(newBody) : newBody;
+                        if (isRequestObj && (!options || options.body === undefined)) {
+                            // Reconstruct the Request with modified body
+                            request = new Request(request, { body: finalBody });
+                            args[0] = request;
+                        } else if (options) {
+                            options.body = finalBody;
+                            args[1] = options;
+                        } else {
+                            args[1] = { body: finalBody };
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('[DS Prompt Manager] Fetch Intercept Error:', e);
+        }
+        return _origFetch.apply(this, args);
+    };
+
+    // ==========================================
+    //  模块 3：UI 构建与渲染
+    // ==========================================
+    function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+    function toast(msg, type = 'info') {
+        const el = document.createElement('div');
+        // 修复：使用无视主题的高级深色毛玻璃材质，告别原站变量变化导致的黑底黑字问题，并在亮暗模式下均具备极强质感。
+        el.style.cssText = `position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px) scale(0.95);z-index:1000001;background:rgba(35,35,35,0.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:#ffffff;padding:12px 24px;border-radius:99px;font-size:14px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);font-family:inherit;transition:all 0.4s cubic-bezier(0.16, 1, 0.3, 1); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px;`;
+        let icon = '';
+        if (type === 'success') {
+            icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-success-primary, #22c55e)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-.997-6l7.07-7.071-1.414-1.414-5.656 5.657-2.829-2.829-1.414 1.414L11.003 16z"/></svg>`;
+        } else if (type === 'error') {
+            icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-error-primary, #ef4444)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1-7v2h2v-2h-2zm0-8v6h2V7h-2z"/></svg>`;
+        }
+        el.innerHTML = `${icon} <span>${msg}</span>`;
+
+        document.body.appendChild(el);
+        requestAnimationFrame(() => { el.style.transform = 'translateX(-50%) translateY(0) scale(1)'; el.style.opacity = '1'; });
+        setTimeout(() => {
+            el.style.opacity = '0'; el.style.transform = 'translateX(-50%) translateY(-15px) scale(0.95)';
+            setTimeout(() => el.remove(), 400);
+        }, 2500);
     }
-    return _origFetch.apply(this, args);
-  };
 
-  // ==========================================
-  //  模块 3：UI 构建与渲染
-  // ==========================================
-  function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
-
-function toast(msg, type = 'info') {
-    const el = document.createElement('div');
-    // 修复：将 background 改为 var(--dsw-alias-bg-layer-1, #ffffff)，使其与页面主题完美同步，告别反色导致的黑底黑字
-    el.style.cssText = `position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px) scale(0.95);z-index:1000001;background:var(--dsw-alias-bg-layer-1, #ffffff);color:var(--dsw-alias-label-primary, #1a1a1a);padding:12px 24px;border-radius:99px;font-size:14px;font-weight:500;box-shadow:0 8px 24px rgba(0,0,0,0.12);border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.08));font-family:inherit;transition:all 0.4s cubic-bezier(0.16, 1, 0.3, 1); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px;`;
-    let icon = '';
-    if (type === 'success') {
-      icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-success-primary, #22c55e)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-.997-6l7.07-7.071-1.414-1.414-5.656 5.657-2.829-2.829-1.414 1.414L11.003 16z"/></svg>`;
-    } else if (type === 'error') {
-      icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-error-primary, #ef4444)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-1-7v2h2v-2h-2zm0-8v6h2V7h-2z"/></svg>`;
-    }
-    el.innerHTML = `${icon} <span>${msg}</span>`;
-
-    document.body.appendChild(el);
-    requestAnimationFrame(() => { el.style.transform = 'translateX(-50%) translateY(0) scale(1)'; el.style.opacity = '1'; });
-    setTimeout(() => {
-      el.style.opacity = '0'; el.style.transform = 'translateX(-50%) translateY(-15px) scale(0.95)';
-      setTimeout(() => el.remove(), 400);
-    }, 2500);
-  }
-
-  const style = document.createElement('style');
-  style.textContent = `
+    const style = document.createElement('style');
+    style.textContent = `
     #dsp-modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.2); z-index: 999997; opacity: 0; pointer-events: none; transition: opacity 0.3s ease; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
     #dsp-modal-overlay.open { opacity: 1; pointer-events: auto; }
 
@@ -279,16 +370,16 @@ function toast(msg, type = 'info') {
     .dsp-custom-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(0,0,0,0.04)); transform: translateX(2px); }
     .dsp-custom-menu-item.active { color: var(--dsw-alias-brand-text); background: var(--dsw-alias-button-ghost-active-fill); }
   `;
-  document.head.appendChild(style);
+    document.head.appendChild(style);
 
-  const overlay = document.createElement('div');
-  overlay.id = 'dsp-modal-overlay';
-  document.body.appendChild(overlay);
+    const overlay = document.createElement('div');
+    overlay.id = 'dsp-modal-overlay';
+    document.body.appendChild(overlay);
 
-  const panel = document.createElement('div');
-  panel.id = 'dsp-panel';
+    const panel = document.createElement('div');
+    panel.id = 'dsp-panel';
 
-  panel.innerHTML = `
+    panel.innerHTML = `
     <div class="hd">
       <h3>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--dsw-alias-brand-primary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>
@@ -350,65 +441,65 @@ function toast(msg, type = 'info') {
       </div>
     </div>
   `;
-  document.body.appendChild(panel);
+    document.body.appendChild(panel);
 
-  const globalMenu = document.createElement('div');
-  globalMenu.id = 'dsp-global-dropdown-menu';
-  globalMenu.className = 'dsp-global-menu';
-  document.body.appendChild(globalMenu);
+    const globalMenu = document.createElement('div');
+    globalMenu.id = 'dsp-global-dropdown-menu';
+    globalMenu.className = 'dsp-global-menu';
+    document.body.appendChild(globalMenu);
 
-  function togglePanel(show) {
-    if (show) {
-      panel.classList.add('open');
-      overlay.classList.add('open');
-      globalMenu.classList.remove('open');
-      document.getElementById('dsp-auto-expert-cb').checked = State.autoExpert;
-    } else {
-      panel.classList.remove('open');
-      overlay.classList.remove('open');
+    function togglePanel(show) {
+        if (show) {
+            panel.classList.add('open');
+            overlay.classList.add('open');
+            globalMenu.classList.remove('open');
+            document.getElementById('dsp-auto-expert-cb').checked = State.autoExpert;
+        } else {
+            panel.classList.remove('open');
+            overlay.classList.remove('open');
+        }
     }
-  }
 
-  panel.querySelector('.cls').onclick = () => togglePanel(false);
-  overlay.onclick = () => togglePanel(false);
+    panel.querySelector('.cls').onclick = () => togglePanel(false);
+    overlay.onclick = () => togglePanel(false);
 
-  document.getElementById('dsp-auto-expert-cb').addEventListener('change', (e) => {
-    State.autoExpert = e.target.checked;
-    State.save();
-    toast(State.autoExpert ? '已开启：自动激活专家模式' : '已关闭：自动激活', 'success');
-  });
+    document.getElementById('dsp-auto-expert-cb').addEventListener('change', (e) => {
+        State.autoExpert = e.target.checked;
+        State.save();
+        toast(State.autoExpert ? '已开启：自动激活专家模式' : '已关闭：自动激活', 'success');
+    });
 
-  const promptListEl = panel.querySelector('#prompt-list');
-  const promptEditArea = panel.querySelector('#prompt-edit-area');
-  const promptEditId = panel.querySelector('#prompt-edit-id');
-  const promptEditTitle = panel.querySelector('#prompt-edit-title');
-  const promptEditContent = panel.querySelector('#prompt-edit-content');
-  const promptEditTime = panel.querySelector('#prompt-edit-time');
+    const promptListEl = panel.querySelector('#prompt-list');
+    const promptEditArea = panel.querySelector('#prompt-edit-area');
+    const promptEditId = panel.querySelector('#prompt-edit-id');
+    const promptEditTitle = panel.querySelector('#prompt-edit-title');
+    const promptEditContent = panel.querySelector('#prompt-edit-content');
+    const promptEditTime = panel.querySelector('#prompt-edit-time');
 
-  window.dsSelectPrompt = function(id) {
-    State.activeId = id;
-    State.save();
-    renderUI();
-    globalMenu.classList.remove('open');
-    toast('指令已生效', 'success');
-  };
+    window.dsSelectPrompt = function (id) {
+        State.activeId = id;
+        State.save();
+        renderUI();
+        globalMenu.classList.remove('open');
+        toast('指令已生效', 'success');
+    };
 
-  function renderUI() {
-    const list = State.prompts;
-    const activeId = State.activeId;
-    const fragPanel = document.createDocumentFragment();
+    function renderUI() {
+        const list = State.prompts;
+        const activeId = State.activeId;
+        const fragPanel = document.createDocumentFragment();
 
-    if (!list.length) {
-      promptListEl.innerHTML = '<div style="color:var(--dsw-alias-label-tertiary);font-size:14px;padding:48px 16px;text-align:center;background:var(--dsw-alias-bg-layer-1);border-radius:16px;border:2px dashed var(--dsw-alias-border-l2);">✨ 还没有属于你的独家指令哦，点击右上角新建吧</div>';
-    } else {
-      promptListEl.innerHTML = '';
-      list.forEach(p => {
-        const row = document.createElement('div');
-        row.className = 'dsp-prompt-item';
+        if (!list.length) {
+            promptListEl.innerHTML = '<div style="color:var(--dsw-alias-label-tertiary);font-size:14px;padding:48px 16px;text-align:center;background:var(--dsw-alias-bg-layer-1);border-radius:16px;border:2px dashed var(--dsw-alias-border-l2);">✨ 还没有属于你的独家指令哦，点击右上角新建吧</div>';
+        } else {
+            promptListEl.innerHTML = '';
+            list.forEach(p => {
+                const row = document.createElement('div');
+                row.className = 'dsp-prompt-item';
 
-        const timeBadge = p.includeTime ? `<span class="dsp-badge-time"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2 2"></path><path d="M5 3L2 6"></path><path d="M19 3l3 3"></path></svg>动态时间</span>` : '';
+                const timeBadge = p.includeTime ? `<span class="dsp-badge-time"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2 2"></path><path d="M5 3L2 6"></path><path d="M19 3l3 3"></path></svg>动态时间</span>` : '';
 
-        row.innerHTML = `
+                row.innerHTML = `
           <div class="dsp-prompt-header">
             <div style="display:flex;align-items:center;">
               <span class="dsp-prompt-title">${esc(p.title)}</span>
@@ -421,103 +512,103 @@ function toast(msg, type = 'info') {
           </div>
           <div class="dsp-prompt-preview">${esc(p.content)}</div>
         `;
-        row.querySelector('.edit').onclick = () => openPromptEditor(p);
-        row.querySelector('.del').onclick = () => deletePrompt(p.id);
-        fragPanel.appendChild(row);
-      });
-      promptListEl.appendChild(fragPanel);
+                row.querySelector('.edit').onclick = () => openPromptEditor(p);
+                row.querySelector('.del').onclick = () => deletePrompt(p.id);
+                fragPanel.appendChild(row);
+            });
+            promptListEl.appendChild(fragPanel);
+        }
+
+        const fragMenu = document.createDocumentFragment();
+        let activeTitle = "无 (纯净对话)";
+
+        const nullItem = document.createElement('div');
+        nullItem.className = 'dsp-custom-menu-item' + (!activeId ? ' active' : '');
+        nullItem.innerHTML = '无 (纯净对话)';
+        nullItem.onclick = () => window.dsSelectPrompt('');
+        fragMenu.appendChild(nullItem);
+
+        list.forEach(p => {
+            const item = document.createElement('div');
+            item.className = 'dsp-custom-menu-item' + (p.id === activeId ? ' active' : '');
+            item.textContent = p.title;
+            item.onclick = () => window.dsSelectPrompt(p.id);
+            fragMenu.appendChild(item);
+            if (p.id === activeId) activeTitle = p.title;
+        });
+
+        globalMenu.innerHTML = '';
+        globalMenu.appendChild(fragMenu);
+
+        const nativeQsText = document.getElementById('dsp-qs-text');
+        const nativePill = document.getElementById('dsp-pill-container');
+
+        if (nativeQsText) nativeQsText.textContent = activeTitle;
+        if (nativePill) {
+            if (activeId) nativePill.classList.add('active');
+            else nativePill.classList.remove('active');
+        }
     }
 
-    const fragMenu = document.createDocumentFragment();
-    let activeTitle = "无 (纯净对话)";
+    panel.querySelector('#prompt-new-btn').onclick = () => openPromptEditor(null);
+    panel.querySelector('#prompt-edit-cancel').onclick = () => { promptEditArea.style.display = 'none'; };
 
-    const nullItem = document.createElement('div');
-    nullItem.className = 'dsp-custom-menu-item' + (!activeId ? ' active' : '');
-    nullItem.innerHTML = '无 (纯净对话)';
-    nullItem.onclick = () => window.dsSelectPrompt('');
-    fragMenu.appendChild(nullItem);
+    panel.querySelector('#prompt-edit-save').onclick = () => {
+        const title = promptEditTitle.value.trim();
+        const content = promptEditContent.value.trim();
+        const includeTime = promptEditTime.checked;
 
-    list.forEach(p => {
-      const item = document.createElement('div');
-      item.className = 'dsp-custom-menu-item' + (p.id === activeId ? ' active' : '');
-      item.textContent = p.title;
-      item.onclick = () => window.dsSelectPrompt(p.id);
-      fragMenu.appendChild(item);
-      if (p.id === activeId) activeTitle = p.title;
-    });
+        if (!title || !content) { toast('标题和内容均不能为空哦', 'error'); return; }
 
-    globalMenu.innerHTML = '';
-    globalMenu.appendChild(fragMenu);
+        const id = promptEditId.value;
+        if (id) {
+            const p = State.prompts.find(x => x.id === id);
+            if (p) { p.title = title; p.content = content; p.includeTime = includeTime; }
+        } else {
+            const newId = 'pr_' + Date.now();
+            State.prompts.push({ id: newId, title, content, includeTime });
+            if (!State.activeId) State.activeId = newId;
+        }
 
-    const nativeQsText = document.getElementById('dsp-qs-text');
-    const nativePill = document.getElementById('dsp-pill-container');
+        State.save();
+        promptEditArea.style.display = 'none';
+        renderUI();
+        toast('保存成功，指令已就绪', 'success');
+    };
 
-    if (nativeQsText) nativeQsText.textContent = activeTitle;
-    if (nativePill) {
-      if (activeId) nativePill.classList.add('active');
-      else nativePill.classList.remove('active');
-    }
-  }
-
-  panel.querySelector('#prompt-new-btn').onclick = () => openPromptEditor(null);
-  panel.querySelector('#prompt-edit-cancel').onclick = () => { promptEditArea.style.display = 'none'; };
-
-  panel.querySelector('#prompt-edit-save').onclick = () => {
-    const title = promptEditTitle.value.trim();
-    const content = promptEditContent.value.trim();
-    const includeTime = promptEditTime.checked;
-
-    if (!title || !content) { toast('标题和内容均不能为空哦', 'error'); return; }
-
-    const id = promptEditId.value;
-    if (id) {
-      const p = State.prompts.find(x => x.id === id);
-      if (p) { p.title = title; p.content = content; p.includeTime = includeTime; }
-    } else {
-      const newId = 'pr_' + Date.now();
-      State.prompts.push({ id: newId, title, content, includeTime });
-      if (!State.activeId) State.activeId = newId;
+    function openPromptEditor(p) {
+        promptEditArea.style.display = 'block';
+        if (p) {
+            promptEditId.value = p.id;
+            promptEditTitle.value = p.title;
+            promptEditContent.value = p.content;
+            promptEditTime.checked = !!p.includeTime;
+        } else {
+            promptEditId.value = '';
+            promptEditTitle.value = '';
+            promptEditContent.value = '';
+            promptEditTime.checked = false;
+        }
+        setTimeout(() => { promptEditArea.scrollIntoView({ behavior: 'smooth', block: 'end' }); promptEditTitle.focus(); }, 50);
     }
 
-    State.save();
-    promptEditArea.style.display = 'none';
-    renderUI();
-    toast('保存成功，指令已就绪', 'success');
-  };
-
-  function openPromptEditor(p) {
-    promptEditArea.style.display = 'block';
-    if (p) {
-      promptEditId.value = p.id;
-      promptEditTitle.value = p.title;
-      promptEditContent.value = p.content;
-      promptEditTime.checked = !!p.includeTime;
-    } else {
-      promptEditId.value = '';
-      promptEditTitle.value = '';
-      promptEditContent.value = '';
-      promptEditTime.checked = false;
+    function deletePrompt(id) {
+        if (!confirm('确定要删除这条精心编写的指令吗？')) return;
+        State.prompts = State.prompts.filter(x => x.id !== id);
+        State.save();
+        if (State.activeId === id) State.activeId = '';
+        renderUI();
+        toast('指令已清理', 'info');
     }
-    setTimeout(() => { promptEditArea.scrollIntoView({ behavior: 'smooth', block: 'end' }); promptEditTitle.focus(); }, 50);
-  }
 
-  function deletePrompt(id) {
-    if (!confirm('确定要删除这条精心编写的指令吗？')) return;
-    State.prompts = State.prompts.filter(x => x.id !== id);
-    State.save();
-    if (State.activeId === id) State.activeId = '';
-    renderUI();
-    toast('指令已清理', 'info');
-  }
+    function injectNativeControls(container, targetNode) {
+        const existing = document.getElementById('dsp-native-wrapper');
+        if (existing) existing.remove();
 
-  function injectNativeControls(container, targetNode) {
-    const existing = document.getElementById('dsp-native-wrapper');
-    if (existing) existing.remove();
+        const wrapper = document.createElement('div');
+        wrapper.id = 'dsp-native-wrapper';
 
-    const wrapper = document.createElement('div');
-    wrapper.id = 'dsp-native-wrapper';
-
-    wrapper.innerHTML = `
+        wrapper.innerHTML = `
       <div class="dsp-native-pill" id="dsp-pill-container">
         <div class="dsp-visual-box" id="dsp-custom-dropdown-trigger">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
@@ -546,131 +637,155 @@ function toast(msg, type = 'info') {
       </div>
     `;
 
-    if (targetNode && targetNode.nextSibling) {
-      container.insertBefore(wrapper, targetNode.nextSibling);
-    } else {
-      container.appendChild(wrapper);
-    }
-
-    const trigger = wrapper.querySelector('#dsp-custom-dropdown-trigger');
-    trigger.onclick = (e) => {
-      e.stopPropagation();
-      if (globalMenu.classList.contains('open')) {
-        globalMenu.classList.remove('open');
-        return;
-      }
-      const rect = trigger.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      globalMenu.style.left = rect.left + 'px';
-      if (spaceBelow < 250) {
-        globalMenu.style.top = 'auto';
-        globalMenu.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
-        globalMenu.style.transformOrigin = 'bottom left';
-        globalMenu.style.animation = 'dsp-dropup-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
-      } else {
-        globalMenu.style.top = (rect.bottom + 8) + 'px';
-        globalMenu.style.bottom = 'auto';
-        globalMenu.style.transformOrigin = 'top left';
-        globalMenu.style.animation = 'dsp-dropdown-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
-      }
-      globalMenu.classList.add('open');
-    };
-
-    wrapper.querySelector('#dsp-open-panel-btn').onclick = () => togglePanel(true);
-    renderUI();
-  }
-
-  // ==========================================
-  //  模块 4：专家模式智能控制 (完美接管)
-  // ==========================================
-  let manualOverride = false;
-  let lastUrl = location.href;
-
-  function checkAndSwitchExpertMode() {
-    if (!State.autoExpert) return; // 遵循用户UI设置面板的意愿
-
-    // URL变化（如开启新对话），重置状态接管控制权
-    if (lastUrl !== location.href) {
-      lastUrl = location.href;
-      manualOverride = false;
-    }
-
-    // 如果用户在当前对话中手动修改过模式，脚本停止干预
-    if (manualOverride) return;
-
-    const expert = document.querySelector('div[data-model-type="expert"][role="radio"]');
-    const quick = document.querySelector('div[data-model-type="default"][role="radio"]');
-
-    if (expert && quick && quick.getAttribute('aria-checked') === 'true') {
-      expert.click();
-    }
-  }
-
-  setInterval(checkAndSwitchExpertMode, 500);
-
-  // 监听用户事件以锁定人工意愿
-  document.addEventListener('click', (e) => {
-    if (globalMenu.classList.contains('open')) {
-      const trigger = document.getElementById('dsp-custom-dropdown-trigger');
-      if ((!trigger || !trigger.contains(e.target)) && !globalMenu.contains(e.target)) {
-        globalMenu.classList.remove('open');
-      }
-    }
-
-    if (!State.autoExpert) return;
-
-    // 动作A：用户手动点击了模式切换
-    const isModelSwitch = e.target.closest('div[data-model-type]');
-    if (isModelSwitch) {
-      manualOverride = true;
-    }
-
-    // 动作B：用户点击了“新建对话”相关按钮 (作为URL变动的有效兜底)
-    const btn = e.target.closest('div[role="button"]');
-    if (btn && (btn.innerText.includes('新对话') || btn.innerText.includes('New'))) {
-      manualOverride = false;
-    }
-  }, { passive: true, capture: true });
-
-  window.addEventListener('scroll', () => {
-    if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
-  }, { capture: true, passive: true });
-
-  window.addEventListener('resize', () => {
-    if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
-  }, { passive: true });
-
-  function startNativeObserver() {
-    let isObserving = false;
-    const observer = new MutationObserver(() => {
-      if (isObserving) return;
-      isObserving = true;
-      requestAnimationFrame(() => {
-        isObserving = false;
-
-        // （旧的自动点击逻辑已被彻底替换到 模块4 定时器中，此处不再需要引起冲突的代码）
-
-        if (!document.getElementById('dsp-native-wrapper')) {
-          let targetBtn = null;
-          const spans = document.querySelectorAll('span._6dbc175, span');
-          for (let s of spans) {
-            if (s.textContent.includes('智能搜索') || s.textContent.includes('深度思考')) {
-               const btn = s.closest('div[role="button"]');
-               if (btn) targetBtn = btn;
-            }
-          }
-          if (targetBtn && targetBtn.parentNode) {
-            injectNativeControls(targetBtn.parentNode, targetBtn);
-          }
+        if (targetNode && targetNode.nextSibling) {
+            container.insertBefore(wrapper, targetNode.nextSibling);
+        } else {
+            container.appendChild(wrapper);
         }
-      });
+
+        const trigger = wrapper.querySelector('#dsp-custom-dropdown-trigger');
+        trigger.onclick = (e) => {
+            e.stopPropagation();
+            if (globalMenu.classList.contains('open')) {
+                globalMenu.classList.remove('open');
+                return;
+            }
+            const rect = trigger.getBoundingClientRect();
+            const spaceBelow = window.innerHeight - rect.bottom;
+            globalMenu.style.left = rect.left + 'px';
+            if (spaceBelow < 250) {
+                globalMenu.style.top = 'auto';
+                globalMenu.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+                globalMenu.style.transformOrigin = 'bottom left';
+                globalMenu.style.animation = 'dsp-dropup-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            } else {
+                globalMenu.style.top = (rect.bottom + 8) + 'px';
+                globalMenu.style.bottom = 'auto';
+                globalMenu.style.transformOrigin = 'top left';
+                globalMenu.style.animation = 'dsp-dropdown-in 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            }
+            globalMenu.classList.add('open');
+        };
+
+        wrapper.querySelector('#dsp-open-panel-btn').onclick = () => togglePanel(true);
+        renderUI();
+    }
+
+    // ==========================================
+    //  模块 4：专家模式智能控制 (完美接管)
+    // ==========================================
+    let manualOverride = false;
+    let lastUrl = location.href;
+
+    function checkAndSwitchExpertMode() {
+        if (!State.autoExpert) return;
+
+        if (lastUrl !== location.href) {
+            lastUrl = location.href;
+            manualOverride = false;
+        }
+
+        if (manualOverride) return;
+
+        const expert = document.querySelector('div[data-model-type="expert"][role="radio"]');
+        const quick = document.querySelector('div[data-model-type="default"][role="radio"]');
+
+        if (expert && quick && quick.getAttribute('aria-checked') === 'true') {
+            expert.click();
+        }
+    }
+
+    setInterval(checkAndSwitchExpertMode, 500);
+
+    document.addEventListener('click', (e) => {
+        if (globalMenu.classList.contains('open')) {
+            const trigger = document.getElementById('dsp-custom-dropdown-trigger');
+            if ((!trigger || !trigger.contains(e.target)) && !globalMenu.contains(e.target)) {
+                globalMenu.classList.remove('open');
+            }
+        }
+
+        if (!State.autoExpert) return;
+
+        const isModelSwitch = e.target.closest('div[data-model-type]');
+        if (isModelSwitch) {
+            manualOverride = true;
+        }
+
+        const btn = e.target.closest('div[role="button"]');
+        if (btn && (btn.innerText.includes('新对话') || btn.innerText.includes('New'))) {
+            manualOverride = false;
+        }
+    }, { passive: true, capture: true });
+
+    window.addEventListener('scroll', () => {
+        if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
+    }, { capture: true, passive: true });
+
+    window.addEventListener('resize', () => {
+        if (globalMenu.classList.contains('open')) globalMenu.classList.remove('open');
+    }, { passive: true });
+
+    function startNativeObserver() {
+        let isObserving = false;
+        const observer = new MutationObserver(() => {
+            if (isObserving) return;
+            isObserving = true;
+            requestAnimationFrame(() => {
+                isObserving = false;
+
+                if (!document.getElementById('dsp-native-wrapper')) {
+                    let targetBtn = null;
+                    const keywords = ['联网搜索', '深度思考', '智能搜索', 'DeepThink', 'Search', 'Web Search'];
+
+                    const candidates = document.querySelectorAll('div[role="switch"], div[role="button"], div[role="checkbox"], button, div[tabindex]');
+                    for (let btn of candidates) {
+                        const txt = btn.textContent.trim();
+                        if (keywords.some(k => txt.includes(k))) {
+                            targetBtn = btn;
+                        }
+                    }
+
+                    if (!targetBtn) {
+                        const spans = document.querySelectorAll('span, div');
+                        for (let s of spans) {
+                            if (s.children.length > 2) continue;
+                            const txt = s.textContent.trim();
+                            if (keywords.some(k => txt === k || txt === k + ' (R1)')) {
+                                targetBtn = s;
+                            }
+                        }
+                    }
+
+                    if (targetBtn && targetBtn.parentNode) {
+                        let container = targetBtn.parentNode;
+                        // 如果父节点不是 flex 容器，尝试向上寻找一级，以保证 UI 对齐
+                        if (container && window.getComputedStyle(container).display !== 'flex' && container.parentNode) {
+                            if (window.getComputedStyle(container.parentNode).display === 'flex') {
+                                targetBtn = container;
+                                container = container.parentNode;
+                            }
+                        }
+                        injectNativeControls(container, targetBtn);
+                    }
+                }
+            });
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+        renderUI();
+        startNativeObserver();
+        console.log('[DS Prompt Manager] V4.3 Loaded (Evolved Prompt Injection Supported)');
+>>>>>>> 79286db (fix: evolve prompt injection logic and update UI entry selector for latest DeepSeek API (v1.1.1))
     });
     observer.observe(document.body, { childList: true, subtree: true });
-  }
+}
 
-  window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', () => {
     renderUI();
     startNativeObserver();
     console.log('[DS Prompt Manager] V4.3 Loaded (Dark Mode Fully Supported & Expert Switch Optimized)');
-  });
-})();
+});
+}) ();
