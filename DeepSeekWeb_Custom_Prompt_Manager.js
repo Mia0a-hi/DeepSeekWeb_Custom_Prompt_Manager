@@ -221,8 +221,7 @@
 
     function toast(msg, type = 'info') {
         const el = document.createElement('div');
-        // 修复：使用无视主题的高级深色毛玻璃材质，告别原站变量变化导致的黑底黑字问题，并在亮暗模式下均具备极强质感。
-        el.style.cssText = `position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px) scale(0.95);z-index:1000001;background:rgba(35,35,35,0.9);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);color:#ffffff;padding:12px 24px;border-radius:99px;font-size:14px;font-weight:500;box-shadow:0 12px 32px rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.1);font-family:inherit;transition:all 0.4s cubic-bezier(0.16, 1, 0.3, 1); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px;`;
+        el.style.cssText = `position:fixed;top:24px;left:50%;transform:translateX(-50%) translateY(-20px) scale(0.95);z-index:1000001;background:var(--dsw-alias-bg-base, #ffffff);color:var(--dsw-alias-label-primary, #1a1a1a);padding:12px 24px;border-radius:99px;font-size:14px;font-weight:500;box-shadow:0 8px 32px rgba(0,0,0,0.12);border:1px solid var(--dsw-alias-border-l2, rgba(0,0,0,0.05));font-family:inherit;transition:all 0.4s cubic-bezier(0.16, 1, 0.3, 1); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px;`;
         let icon = '';
         if (type === 'success') {
             icon = `<svg width="18" height="18" viewBox="0 0 24 24" fill="var(--dsw-alias-state-success-primary, #22c55e)" stroke="none"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm-.997-6l7.07-7.071-1.414-1.414-5.656 5.657-2.829-2.829-1.414 1.414L11.003 16z"/></svg>`;
@@ -777,15 +776,6 @@
     window.addEventListener('DOMContentLoaded', () => {
         renderUI();
         startNativeObserver();
-        console.log('[DS Prompt Manager] V4.3 Loaded (Evolved Prompt Injection Supported)');
->>>>>>> 79286db (fix: evolve prompt injection logic and update UI entry selector for latest DeepSeek API (v1.1.1))
+        console.log('[DS Prompt Manager] V4.3 Loaded (Evolved Prompt Injection Supported & Dark Mode Optimized)');
     });
-    observer.observe(document.body, { childList: true, subtree: true });
-}
-
-    window.addEventListener('DOMContentLoaded', () => {
-    renderUI();
-    startNativeObserver();
-    console.log('[DS Prompt Manager] V4.3 Loaded (Dark Mode Fully Supported & Expert Switch Optimized)');
-});
-}) ();
+})();
